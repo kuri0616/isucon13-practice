@@ -66,6 +66,9 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	conf.DBName = "isupipe"
 	conf.ParseTime = true
 
+	//プリペアドステートメントを無効化
+	conf.InterpolateParams = true
+
 	if v, ok := os.LookupEnv(networkTypeEnvKey); ok {
 		conf.Net = v
 	}
