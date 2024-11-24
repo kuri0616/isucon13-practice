@@ -11,7 +11,6 @@ echo "Analyzing slow query log and saving the result..."
 sudo pt-query-digest /var/log/mysql/mysql-slow.log > ~/log/$(date +mysql-slow.log-%m-%d-%H-%M -d "+9 hours")
 
 # 古いスローログを削除
-echo "Removing old slow query log..."
 sudo rm /var/log/mysql/mysql-slow.log
 
 # MySQLを再起動して新しいスローログを生成
