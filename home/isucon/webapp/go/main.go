@@ -4,6 +4,7 @@ package main
 // sqlx的な参考: https://jmoiron.github.io/sqlx/
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -25,6 +26,7 @@ import (
 const (
 	listenPort                     = 8080
 	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS"
+	iconsPath                      = "../public/icons"
 )
 
 var (
@@ -66,9 +68,6 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	conf.DBName = "isupipe"
 	conf.ParseTime = true
 
-	//プリペアドステートメントを無効化
-	conf.InterpolateParams = true
-
 	if v, ok := os.LookupEnv(networkTypeEnvKey); ok {
 		conf.Net = v
 	}
@@ -109,9 +108,48 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	return db, nil
 }
 
+func initializeIcons() error {
+	// iconsディレクトリを削除
+	err := os.RemoveAll(iconsPath)
+	if err != nil {
+		return err
+	}
+
+	// user_idとimageを取得
+	var icons []struct {
+		UserID int64  `db:"user_id"`
+		Image  []byte `db:"image"`
+	}
+	if err := dbConn.Select(&icons, "SELECT user_id, image FROM icons"); err != nil {
+		return err
+	}
+
+	// iconsディレクトリを作成
+	err = os.Mkdir(iconsPath, 0755)
+	if err != nil {
+		// 既に存在する場合は無視
+		if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+	}
+	for _, icon := range icons {
+		err = os.WriteFile(fmt.Sprintf("%s/%d.jpg", iconsPath, icon.UserID), icon.Image, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func initializeHandler(c echo.Context) error {
 	if out, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
 		c.Logger().Warnf("init.sh failed with err=%s", string(out))
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
+	}
+
+	if err := initializeIcons(); err != nil {
+		c.Logger().Warnf("initializeIcons failed with err=%s", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
@@ -127,7 +165,7 @@ func main() {
 	e.Logger.SetLevel(echolog.DEBUG)
 	e.Use(middleware.Logger())
 	cookieStore := sessions.NewCookieStore(secret)
-	cookieStore.Options.Domain = "*.u.isucon.local"
+	cookieStore.Options.Domain = "*.u.isucon.dev"
 	e.Use(session.Middleware(cookieStore))
 	// e.Use(middleware.Recover())
 

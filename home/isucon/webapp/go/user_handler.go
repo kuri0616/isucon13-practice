@@ -104,21 +104,14 @@ func getIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", user.ID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.File(fallbackImage)
-		} else {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user icon: "+err.Error())
-		}
-	}
+	// nginxに任せる
+	uri := fmt.Sprintf("/icons/%d.jpg", user.ID)
+	c.Response().Header().Set("X-Accel-Redirect", uri)
 
-	return c.Blob(http.StatusOK, "image/jpeg", image)
+	return c.NoContent(http.StatusOK)
 }
 
 func postIconHandler(c echo.Context) error {
-	ctx := c.Request().Context()
-
 	if err := verifyUserSession(c); err != nil {
 		// echo.NewHTTPErrorが返っているのでそのまま出力
 		return err
@@ -134,32 +127,23 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to decode the request body as json")
 	}
 
-	tx, err := dbConn.BeginTxx(ctx, nil)
+	// iconsを画像に変換して保存
+	err := os.Mkdir(fmt.Sprintf("%s", iconsPath), 0755)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
+		// 既に存在する場合は無視
+		if !errors.Is(err, os.ErrExist) {
+			c.Logger().Errorf("failed to create icons directory: %v", err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
-	}
-
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, image) VALUES (?, ?)", userID, req.Image)
+	err = os.WriteFile(fmt.Sprintf("%s/%d.jpg", iconsPath, userID), req.Image, 0644)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
-	}
-
-	iconID, err := rs.LastInsertId()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get last inserted icon id: "+err.Error())
-	}
-
-	if err := tx.Commit(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
+		c.Logger().Errorf("failed to write icon file: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return c.JSON(http.StatusCreated, &PostIconResponse{
-		ID: iconID,
+		ID: 1,
 	})
 }
 
@@ -256,7 +240,7 @@ func registerHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert user theme: "+err.Error())
 	}
 
-	if out, err := exec.Command("pdnsutil", "add-record", "u.isucon.local", req.Name, "A", "0", powerDNSSubdomainAddress).CombinedOutput(); err != nil {
+	if out, err := exec.Command("pdnsutil", "add-record", "u.isucon.dev", req.Name, "A", "0", powerDNSSubdomainAddress).CombinedOutput(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, string(out)+": "+err.Error())
 	}
 
@@ -321,7 +305,7 @@ func loginHandler(c echo.Context) error {
 	}
 
 	sess.Options = &sessions.Options{
-		Domain: "u.isucon.local",
+		Domain: "u.isucon.dev",
 		MaxAge: int(60000),
 		Path:   "/",
 	}
@@ -404,9 +388,9 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
+	image, err := os.ReadFile(fmt.Sprintf("%s/%d.jpg", iconsPath, userModel.ID))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
 			return User{}, err
 		}
 		image, err = os.ReadFile(fallbackImage)
@@ -414,6 +398,7 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			return User{}, err
 		}
 	}
+
 	iconHash := sha256.Sum256(image)
 
 	user := User{
