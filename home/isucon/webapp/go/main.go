@@ -68,6 +68,9 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	conf.DBName = "isupipe"
 	conf.ParseTime = true
 
+	//プリペアドステートメントを無効化
+	conf.InterpolateParams = true
+
 	if v, ok := os.LookupEnv(networkTypeEnvKey); ok {
 		conf.Net = v
 	}
@@ -165,7 +168,7 @@ func main() {
 	e.Logger.SetLevel(echolog.DEBUG)
 	e.Use(middleware.Logger())
 	cookieStore := sessions.NewCookieStore(secret)
-	cookieStore.Options.Domain = "*.u.isucon.dev"
+	cookieStore.Options.Domain = "*.u.isucon.local"
 	e.Use(session.Middleware(cookieStore))
 	// e.Use(middleware.Recover())
 
