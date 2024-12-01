@@ -381,6 +381,45 @@ func moderateHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get last inserted NG word id: "+err.Error())
 	}
 
+	var ngwords []*NGWord
+	if err := tx.SelectContext(ctx, &ngwords, "SELECT * FROM ng_words WHERE livestream_id = ?", livestreamID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get NG words: "+err.Error())
+	}
+
+	for _, ngword := range ngwords {
+		// NGワードにヒットする過去の投稿も全削除する
+		// 修正: NGワードを含むコメントIDを取得する
+		var CommentIDs []int
+		query := `	SELECT id
+				FROM livecomments
+				WHERE	livestream_id = ? AND	comment LIKE ?;`
+
+		rows, err := tx.QueryxContext(ctx, query, livestreamID, "%"+ngword.Word+"%")
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var commentID int
+			if err := rows.Scan(&commentID); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to scan livecomments: "+err.Error())
+			}
+			CommentIDs = append(CommentIDs, commentID)
+		}
+		// ライブコメントを一括で削除
+		if len(CommentIDs) > 0 {
+			query, params, err := sqlx.In("DELETE FROM livecomments WHERE id IN (?)", CommentIDs)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate query: "+err.Error())
+			}
+			query = dbConn.Rebind(query)
+			if _, err := dbConn.Exec(query, params...); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete comments: "+err.Error())
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
 	}
