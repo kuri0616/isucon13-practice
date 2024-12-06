@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jmoiron/sqlx"
 	"net/http"
 	"os"
 	"os/exec"
@@ -227,7 +228,7 @@ func registerHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, string(out)+": "+err.Error())
 	}
 
-	user, err := fillUserResponse(ctx, userModel)
+	user, err := txFillUserResponse(ctx, tx, userModel)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill user: "+err.Error())
 	}
@@ -358,6 +359,40 @@ func verifyUserSession(c echo.Context) error {
 func fillUserResponse(ctx context.Context, userModel UserModel) (User, error) {
 	themeModel := ThemeModel{}
 	if err := dbConn.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
+		return User{}, err
+	}
+
+	image, err := os.ReadFile(fmt.Sprintf("%s/%d.jpg", iconsPath, userModel.ID))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return User{}, err
+		}
+		image, err = os.ReadFile(fallbackImage)
+		if err != nil {
+			return User{}, err
+		}
+	}
+
+	iconHash := sha256.Sum256(image)
+
+	user := User{
+		ID:          userModel.ID,
+		Name:        userModel.Name,
+		DisplayName: userModel.DisplayName,
+		Description: userModel.Description,
+		Theme: Theme{
+			ID:       themeModel.ID,
+			DarkMode: themeModel.DarkMode,
+		},
+		IconHash: fmt.Sprintf("%x", iconHash),
+	}
+
+	return user, nil
+}
+
+func txFillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (User, error) {
+	themeModel := ThemeModel{}
+	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
 		return User{}, err
 	}
 
