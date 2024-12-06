@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jmoiron/sqlx"
 	"net/http"
 	"strconv"
 	"time"
@@ -118,7 +119,7 @@ func postReactionHandler(c echo.Context) error {
 	}
 	reactionModel.ID = reactionID
 
-	reaction, err := fillReactionResponse(ctx, reactionModel)
+	reaction, err := txFillReactionResponse(ctx, tx, reactionModel)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill reaction: "+err.Error())
 	}
@@ -142,6 +143,36 @@ func fillReactionResponse(ctx context.Context, reactionModel ReactionModel) (Rea
 
 	livestreamModel := LivestreamModel{}
 	if err := dbConn.GetContext(ctx, &livestreamModel, "SELECT * FROM livestreams WHERE id = ?", reactionModel.LivestreamID); err != nil {
+		return Reaction{}, err
+	}
+	livestream, err := fillLivestreamResponse(ctx, livestreamModel)
+	if err != nil {
+		return Reaction{}, err
+	}
+
+	reaction := Reaction{
+		ID:         reactionModel.ID,
+		EmojiName:  reactionModel.EmojiName,
+		User:       user,
+		Livestream: livestream,
+		CreatedAt:  reactionModel.CreatedAt,
+	}
+
+	return reaction, nil
+}
+
+func txFillReactionResponse(ctx context.Context, tx *sqlx.Tx, reactionModel ReactionModel) (Reaction, error) {
+	userModel := UserModel{}
+	if err := tx.GetContext(ctx, &userModel, "SELECT * FROM users WHERE id = ?", reactionModel.UserID); err != nil {
+		return Reaction{}, err
+	}
+	user, err := fillUserResponse(ctx, userModel)
+	if err != nil {
+		return Reaction{}, err
+	}
+
+	livestreamModel := LivestreamModel{}
+	if err := tx.GetContext(ctx, &livestreamModel, "SELECT * FROM livestreams WHERE id = ?", reactionModel.LivestreamID); err != nil {
 		return Reaction{}, err
 	}
 	livestream, err := fillLivestreamResponse(ctx, livestreamModel)
