@@ -6,21 +6,20 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/go-sql-driver/mysql"
+	"github.com/gorilla/sessions"
+	"github.com/jmoiron/sqlx"
+	"github.com/kaz/pprotein/integration/standalone"
+	"github.com/labstack/echo-contrib/session"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	echolog "github.com/labstack/gommon/log"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
-
-	"github.com/go-sql-driver/mysql"
-	"github.com/jmoiron/sqlx"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-
-	"github.com/gorilla/sessions"
-	"github.com/labstack/echo-contrib/session"
-	echolog "github.com/labstack/gommon/log"
 )
 
 const (
@@ -243,6 +242,8 @@ func main() {
 		os.Exit(1)
 	}
 	powerDNSSubdomainAddress = subdomainAddr
+
+	go standalone.Integrate(":19000")
 
 	// HTTPサーバ起動
 	listenAddr := net.JoinHostPort("", strconv.Itoa(listenPort))
